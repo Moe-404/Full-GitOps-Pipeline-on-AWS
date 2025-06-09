@@ -60,3 +60,8 @@ variable "security_group_ids" {
   description = "List of security group IDs to attach to the EKS nodes"
   type        = list(string)
 }
+
+variable "eks_worker_sg_id" {
+  description = "Security group ID to attach to worker nodes"
+  type        = string
+}
