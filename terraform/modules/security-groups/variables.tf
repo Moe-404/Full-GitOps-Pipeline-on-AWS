@@ -1,4 +1,5 @@
 variable "vpc_id" {
-type = string
+  description = "The ID of the VPC where security groups will be created"
+  type        = string
 }
 variable "project_name" {}

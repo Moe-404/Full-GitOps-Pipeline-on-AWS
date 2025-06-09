@@ -39,3 +39,8 @@ module "ecr" {
   repository_name = "${var.project_name}-repository"
   project_name    = var.project_name
 }
+module "secret_manager" {
+  source          = "./modules/secret-manager"
+    region          = var.region
+    account_id      = var.account_id
+}
