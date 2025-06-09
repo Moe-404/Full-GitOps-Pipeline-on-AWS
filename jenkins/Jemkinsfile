@@ -1,0 +1,250 @@
+pipeline {
+    agent any
+    
+    environment {
+        // AWS Configuration
+        AWS_DEFAULT_REGION = 'us-east-1'
+        AWS_ACCOUNT_ID = credentials('aws-account-id')
+        ECR_REPOSITORY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/devops-gp-repository"
+        IMAGE_NAME = 'nodejs-app'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        
+        // Application Repository
+        NODEJS_REPO = 'https://github.com/moe-404/jenkins_nodejs_example.git'
+        
+        // SonarQube Configuration - Use direct URL instead of Jenkins plugin
+        SONARQUBE_URL = 'http://sonarqube:9000' // Or your SonarQube server URL
+        SONAR_TOKEN = credentials('sonar-token')
+        SONAR_PROJECT_KEY = 'devops-gp-nodejs-app'
+        
+        // Slack Configuration
+        SLACK_WEBHOOK = credentials('slack-webhook-url')
+        SLACK_CHANNEL = '#devops-notifications'
+        
+        // Trivy Configuration
+        TRIVY_SEVERITY = 'HIGH,CRITICAL'
+        TRIVY_EXIT_CODE = '0' // Don't fail build on vulnerabilities, just report
+    }
+    
+    tools {
+        nodejs 'nodejs-18'
+    }
+    
+    stages {
+        stage('Clone Repository') {
+            steps {
+                script {
+                    // Clone the NodeJS application repository
+                    echo "📥 Cloning NodeJS application repository..."
+                    dir('app') {
+                        git branch: 'main', 
+                            url: "${env.NODEJS_REPO}",
+                            credentialsId: 'github-credentials'
+                    }
+                    
+                    // Display repository information
+                    dir('app') {
+                        sh '''
+                            echo "📋 Repository Information:"
+                            echo "Current commit: $(git rev-parse HEAD)"
+                            echo "Commit message: $(git log -1 --pretty=%B)"
+                            echo "Author: $(git log -1 --pretty=%an)"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Code Quality Analysis') {
+            steps {
+                dir('app') {
+                    script {
+                        echo "🔍 Running SonarQube analysis..."
+                        
+                        // Install dependencies first
+                        sh 'npm install || echo "No package.json found, skipping npm install"'
+                        
+                        // Run SonarQube analysis using Docker
+                        sh '''
+                            docker run --rm \
+                                -v $(pwd):/usr/src \
+                                -w /usr/src \
+                                sonarsource/sonar-scanner-cli:latest \
+                                sonar-scanner \
+                                    -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                    -Dsonar.projectName="DevOps GP NodeJS App" \
+                                    -Dsonar.sources=. \
+                                    -Dsonar.host.url=${SONARQUBE_URL} \
+                                    -Dsonar.login=${SONAR_TOKEN} \
+                                    -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                                    -Dsonar.exclusions=node_modules/**,coverage/**,*.test.js
+                        '''
+                        
+                        echo "✅ SonarQube analysis completed"
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                dir('app') {
+                    script {
+                        echo "🐳 Building Docker image..."
+                        
+                        // Build the Docker image
+                        sh """
+                            docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPOSITORY}:${IMAGE_TAG}
+                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPOSITORY}:latest
+                        """
+                        
+                        // Display image info
+                        sh """
+                            echo "📊 Docker image built successfully:"
+                            docker images | grep ${IMAGE_NAME}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan with Trivy') {
+            steps {
+                script {
+                    echo "🔒 Running Trivy security scan..."
+                    
+                    // Run Trivy scan on the Docker image
+                    sh """
+                        # Run vulnerability scan and save report
+                        docker run --rm \
+                            -v /var/run/docker.sock:/var/run/docker.sock \
+                            -v \$(pwd):/workspace \
+                            aquasec/trivy:latest image \
+                            --severity ${TRIVY_SEVERITY} \
+                            --exit-code ${TRIVY_EXIT_CODE} \
+                            --format json \
+                            --output /workspace/trivy-report.json \
+                            ${IMAGE_NAME}:${IMAGE_TAG}
+                        
+                        # Also generate table format for console output
+                        docker run --rm \
+                            -v /var/run/docker.sock:/var/run/docker.sock \
+                            aquasec/trivy:latest image \
+                            --severity ${TRIVY_SEVERITY} \
+                            --exit-code 0 \
+                            --format table \
+                            ${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                    
+                    // Parse and report vulnerabilities
+                    script {
+                        if (fileExists('trivy-report.json')) {
+                            def trivyReport = readJSON file: 'trivy-report.json'
+                            def criticalCount = 0
+                            def highCount = 0
+                            
+                            trivyReport.Results?.each { result ->
+                                result.Vulnerabilities?.each { vuln ->
+                                    if (vuln.Severity == 'CRITICAL') criticalCount++
+                                    if (vuln.Severity == 'HIGH') highCount++
+                                }
+                            }
+                            
+                            echo "🔒 Security Scan Results: Critical: ${criticalCount}, High: ${highCount}"
+                            
+                            if (criticalCount == 0 && highCount == 0) {
+                                echo "✅ No critical or high vulnerabilities found"
+                            }
+                        }
+                    }
+                    
+                    // Archive the security report
+                    archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Login to ECR') {
+            steps {
+                script {
+                    echo "🔐 Logging in to Amazon ECR..."
+                    sh """
+                        aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | \
+                        docker login --username AWS --password-stdin ${ECR_REPOSITORY}
+                    """
+                }
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                script {
+                    echo "📤 Pushing Docker image to ECR..."
+                    
+                    // Create ECR repository if it doesn't exist
+                    sh """
+                        aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
+                        aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
+                    """
+                    
+                    // Push images to ECR
+                    sh """
+                        docker push ${ECR_REPOSITORY}:${IMAGE_TAG}
+                        docker push ${ECR_REPOSITORY}:latest
+                        
+                        echo "✅ Successfully pushed images to ECR:"
+                        echo "  - ${ECR_REPOSITORY}:${IMAGE_TAG}"
+                        echo "  - ${ECR_REPOSITORY}:latest"
+                    """
+                }
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    echo "🧹 Cleaning up local Docker images..."
+                    sh """
+                        docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
+                        docker rmi ${ECR_REPOSITORY}:${IMAGE_TAG} || true
+                        docker rmi ${ECR_REPOSITORY}:latest || true
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            script {
+                def duration = currentBuild.durationString.replace(' and counting', '')
+                slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'good',
+                    message: "✅ *Pipeline SUCCESS* - ${env.JOB_NAME} #${env.BUILD_NUMBER}\n" +
+                            "Duration: ${duration}\n" +
+                            "Image: ${ECR_REPOSITORY}:${IMAGE_TAG}\n" +
+                            "Repository: ${env.NODEJS_REPO}"
+                )
+            }
+        }
+        
+        failure {
+            script {
+                slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'danger',
+                    message: "❌ *Pipeline FAILED* - ${env.JOB_NAME} #${env.BUILD_NUMBER}\n" +
+                            "Failed Stage: ${env.STAGE_NAME}\n" +
+                            "Repository: ${env.NODEJS_REPO}\n" +
+                            "Check logs: ${env.BUILD_URL}console"
+                )
+            }
+        }
+        
+        always {
+            cleanWs()
+        }
+    }
+}

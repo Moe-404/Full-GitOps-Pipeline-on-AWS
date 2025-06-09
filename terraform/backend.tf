@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket         = "iti-grad-project-state-bucket"
+    bucket         = "iti-gp-state-bucket"
     key            = "terraform/state"
     region         = "us-east-1"
     # dynamodb_table = "terraform-lock-table"

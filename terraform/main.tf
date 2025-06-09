@@ -13,6 +13,11 @@ module "security_groups" {
   project_name = var.project_name
 }
 
+module "iam" {
+  source             = "./modules/iam"
+  cluster_name       = "${var.project_name}-cluster"
+}
+
 module "eks" {
   source = "./modules/eks"
   cluster_name    = "${var.project_name}-cluster"
@@ -21,8 +26,18 @@ module "eks" {
   desired_size = var.desired_size
   max_size     = var.max_size
   min_size     = var.min_size
-  instance_types = ["t3.medium"]
+  instance_types = [var.eks_node_instance_type]
   enable_public_endpoint = false
+  cluster_role_arn = module.iam.eks_cluster_role_arn
+  node_role_arn    = module.iam.eks_node_role_arn
+  security_group_ids = [module.security_groups.bastion_sg_id]
+  depends_on = [module.iam]
+}
+
+module "irsa" {
+  source            = "./modules/irsa"
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  depends_on        = [module.eks]
 }
 
 module "bastion" {
