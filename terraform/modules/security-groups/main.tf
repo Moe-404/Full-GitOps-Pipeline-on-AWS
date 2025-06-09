@@ -1,4 +1,3 @@
-# Security group
 # This security group allows SSH, HTTP, and HTTPS access to the web server
 resource "aws_security_group" "web_sg" {
   vpc_id = var.vpc_id
