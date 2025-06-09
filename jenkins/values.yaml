@@ -1,0 +1,88 @@
+jenkins:
+  # Basic authentication
+  auth:
+    admin:
+      username: "admin"
+      password: "admin123"
+
+  service:
+    type: LoadBalancer
+    ports:
+      http: 80
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessModes:
+      - ReadWriteOnce
+    storageClass: "gp2"
+
+  plugins:
+    - "kubernetes"
+    - "workflow-aggregator"
+    - "git"
+    - "configuration-as-code"
+    - "nodejs"
+    - "slack"
+
+  configuration: |
+    jenkins:
+      numExecutors: 0
+      clouds:
+        - kubernetes:
+            name: "kubernetes"
+            serverUrl: "https://kubernetes.default.svc.cluster.local"
+            namespace: "jenkins"
+            skipTlsVerify: true
+            templates:
+              - name: "kaniko-pod"
+                namespace: "jenkins"
+                label: "kaniko"
+                yaml: |
+                  apiVersion: v1
+                  kind: Pod
+                  spec:
+                    serviceAccountName: jenkins
+                    containers:
+                    - name: kaniko
+                      image: gcr.io/kaniko-project/executor:debug
+                      command: ["/bin/sh"]
+                      args: ["-c", "sleep 99d"]
+                      env:
+                      - name: AWS_DEFAULT_REGION
+                        value: us-east-1
+                    - name: aws-cli
+                      image: amazon/aws-cli:latest
+                      command: ["/bin/sh"]
+                      args: ["-c", "sleep 99d"]
+                    - name: trivy
+                      image: aquasec/trivy:latest
+                      command: ["/bin/sh"]
+                      args: ["-c", "sleep 99d"]
+                    - name: sonar-scanner
+                      image: sonarsource/sonar-scanner-cli:latest
+                      command: ["/bin/sh"]
+                      args: ["-c", "sleep 99d"]
+                    - name: nodejs
+                      image: node:18-alpine
+                      command: ["/bin/sh"]
+                      args: ["-c", "sleep 99d"]
+    
+    tool:
+      nodejs:
+        installations:
+          - name: "nodejs-18"
+            properties:
+              - installSource:
+                  installers:
+                    - nodeJSInstaller:
+                        id: "18.17.0"
+
+serviceAccount:
+  create: true
+  name: "jenkins"
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/JenkinsEKSRole"
+
+rbac:
+  create: true 

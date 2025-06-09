@@ -1,56 +1,7 @@
 pipeline {
     agent {
         kubernetes {
-            yaml """
-apiVersion: v1
-kind: Pod
-spec:
-  serviceAccountName: jenkins
-  containers:
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:debug
-    imagePullPolicy: Always
-    command:
-    - sleep
-    args:
-    - 99d
-    env:
-    - name: AWS_DEFAULT_REGION
-      value: us-east-1
-    volumeMounts:
-    - name: jenkins-docker-cfg
-      mountPath: /kaniko/.docker
-  - name: aws-cli
-    image: amazon/aws-cli:latest
-    command:
-    - sleep
-    args:
-    - 99d
-    env:
-    - name: AWS_DEFAULT_REGION
-      value: us-east-1
-  - name: trivy
-    image: aquasec/trivy:latest
-    command:
-    - sleep
-    args:
-    - 99d
-  - name: sonar-scanner
-    image: sonarsource/sonar-scanner-cli:latest
-    command:
-    - sleep
-    args:
-    - 99d
-  - name: nodejs
-    image: node:18-alpine
-    command:
-    - sleep
-    args:
-    - 99d
-  volumes:
-  - name: jenkins-docker-cfg
-    emptyDir: {}
-"""
+            label 'kaniko'
         }
     }
     
