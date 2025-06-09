@@ -31,6 +31,7 @@ module "eks" {
   cluster_role_arn = module.iam.eks_cluster_role_arn
   node_role_arn    = module.iam.eks_node_role_arn
   security_group_ids = [module.security_groups.bastion_sg_id]
+  eks_worker_sg_id = module.security_groups.eks_worker_sg_id
   depends_on = [module.iam]
 }
 
