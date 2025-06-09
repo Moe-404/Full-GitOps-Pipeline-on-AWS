@@ -1,6 +1,6 @@
 resource "aws_instance" "bastion" {
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t3.micro"
+  instance_type          = "t2.micro"
   subnet_id              = var.public_subnet_ids[0] # Create the bastion host in the first public subnet
   vpc_security_group_ids = [var.bastion_sg_id]
   key_name               = aws_key_pair.bastion_key.key_name

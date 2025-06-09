@@ -45,3 +45,19 @@ variable "key_pair_name" {
   type        = string
   default     = ""
 }
+
+variable "cluster_role_arn" {
+  description = "ARN of the IAM role for the EKS cluster"
+  type        = string
+}
+
+variable "node_role_arn" {
+  description = "ARN of the IAM role for the EKS node group"
+  type        = string
+}
+
+variable "security_group_ids" {
+  description = "List of security group IDs for the EKS cluster"
+  type        = list(string)
+  default     = []
+}
