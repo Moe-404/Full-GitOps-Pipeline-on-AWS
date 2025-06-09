@@ -47,17 +47,21 @@ variable "key_pair_name" {
 }
 
 variable "cluster_role_arn" {
-  description = "ARN of the IAM role for the EKS cluster"
+  description = "IAM role ARN for the EKS cluster"
   type        = string
 }
 
 variable "node_role_arn" {
-  description = "ARN of the IAM role for the EKS node group"
+  description = "IAM role ARN for the EKS worker nodes"
   type        = string
 }
 
 variable "security_group_ids" {
-  description = "List of security group IDs for the EKS cluster"
+  description = "List of security group IDs to attach to the EKS nodes"
   type        = list(string)
-  default     = []
+}
+
+variable "eks_worker_sg_id" {
+  description = "Security group ID to attach to worker nodes"
+  type        = string
 }
