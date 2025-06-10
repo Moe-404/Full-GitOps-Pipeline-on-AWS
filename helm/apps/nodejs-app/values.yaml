@@ -1,0 +1,4 @@
+image:
+  repository: mahmoud254/jenkins_nodejs_example
+  tag: latest
+replicaCount: 3

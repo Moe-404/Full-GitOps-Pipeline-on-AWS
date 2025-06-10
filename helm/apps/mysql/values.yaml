@@ -1,0 +1,8 @@
+auth:
+  existingSecret: "db-secret"
+  usernameKey: "DB_USER"
+  passwordKey: "DB_PASSWORD"
+  database: "appdb"
+primary:
+  service:
+    type: ClusterIP
