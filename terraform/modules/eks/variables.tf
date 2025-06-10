@@ -31,7 +31,7 @@ variable "min_size" {
 
 variable "instance_types" {
   description = "Instance types for worker nodes"
-  type        = list(string)
+  type        = string
 }
 
 variable "enable_public_endpoint" {
