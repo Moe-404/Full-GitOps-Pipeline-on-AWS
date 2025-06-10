@@ -19,6 +19,12 @@ resource "aws_launch_template" "eks_lt" {
 
   vpc_security_group_ids = [var.eks_worker_sg_id]
 
+  user_data = base64encode(<<-EOT
+    #!/bin/bash
+    /etc/eks/bootstrap.sh ${var.cluster_name}
+  EOT
+  )
+
   tag_specifications {
     resource_type = "instance"
     tags = {
@@ -26,6 +32,7 @@ resource "aws_launch_template" "eks_lt" {
     }
   }
 }
+
 
 data "aws_ami" "eks_ami" {
   most_recent = true
