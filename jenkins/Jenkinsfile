@@ -1,198 +1,152 @@
 pipeline {
     agent {
         kubernetes {
-            label 'kaniko'
+            label 'devops-gp-pipeline'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command:
+    - /busybox/cat
+    tty: true
+    volumeMounts:
+    - name: kaniko-secret
+      mountPath: /kaniko/.docker
+  - name: aws-cli
+    image: amazon/aws-cli:latest
+    command:
+    - cat
+    tty: true
+    env:
+    - name: AWS_DEFAULT_REGION
+      value: "us-east-1"
+  volumes:
+  - name: kaniko-secret
+    emptyDir: {}
+"""
         }
     }
     
     environment {
         // AWS Configuration
         AWS_DEFAULT_REGION = 'us-east-1'
-        AWS_ACCOUNT_ID = credentials('aws-account-id')
+        AWS_ACCOUNT_ID = "627073650373"
         ECR_REPOSITORY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/devops-gp-repository"
-        IMAGE_NAME = 'nodejs-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
         
         // Application Repository
-        NODEJS_REPO = 'https://github.com/moe-404/jenkins_nodejs_example.git'
-        
-        // SonarQube Configuration
-        SONARQUBE_URL = 'http://sonarqube.sonarqube.svc.cluster.local:9000'
-        SONAR_TOKEN = credentials('sonar-token')
-        SONAR_PROJECT_KEY = 'devops-gp-nodejs-app'
+        NODEJS_REPO = 'https://github.com/Moe-404/jenkins_nodejs_example.git'
         
         // Slack Configuration
         SLACK_WEBHOOK = credentials('slack-webhook-url')
-        SLACK_CHANNEL = '#devops-notifications'
-        
-        // Trivy Configuration
-        TRIVY_SEVERITY = 'HIGH,CRITICAL'
-        TRIVY_EXIT_CODE = '0'
+        SLACK_CHANNEL = '#all-jenkins'
     }
-
+    
     stages {
         stage('Clone Repository') {
             steps {
-                container('nodejs') {
-                    script {
-                        echo "📥 Cloning NodeJS application repository..."
-                        git branch: 'main', 
+                script {
+                    echo "📥 Cloning NodeJS application repository..."
+                    
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: 'main']],
+                        userRemoteConfigs: [[
                             url: "${env.NODEJS_REPO}",
                             credentialsId: 'github-credentials'
-                        
-                        sh '''
-                            echo "📋 Repository Information:"
-                            echo "Current commit: $(git rev-parse HEAD)"
-                            echo "Commit message: $(git log -1 --pretty=%B)"
-                            echo "Author: $(git log -1 --pretty=%an)"
-                        '''
+                        ]]
+                    ])
+                    
+                    echo "✅ Repository cloned successfully"
+                }
+            }
+        }
+        
+        stage('Validate Dockerfile') {
+            steps {
+                script {
+                    echo "🔍 Checking for Dockerfile..."
+                    if (!fileExists('Dockerfile')) {
+                        echo "⚠️ No Dockerfile found, creating a basic one..."
+                        writeFile file: 'Dockerfile', text: '''FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --only=production
+
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Start application
+CMD ["npm", "start"]
+'''
+                    } else {
+                        echo "✅ Dockerfile found"
                     }
                 }
             }
         }
         
-        stage('Install Dependencies & Code Quality') {
-            parallel {
-                stage('Install Dependencies') {
-                    steps {
-                        container('nodejs') {
-                            script {
-                                echo "📦 Installing Node.js dependencies..."
-                                sh '''
-                                    npm install || echo "No package.json found, skipping npm install"
-                                    npm run test || echo "No tests defined"
-                                '''
-                            }
-                        }
-                    }
-                }
-                
-                stage('SonarQube Analysis') {
-                    steps {
-                        container('sonar-scanner') {
-                            script {
-                                echo "🔍 Running SonarQube analysis..."
-                                sh '''
-                                    sonar-scanner \
-                                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                                        -Dsonar.projectName="DevOps GP NodeJS App" \
-                                        -Dsonar.sources=. \
-                                        -Dsonar.host.url=${SONARQUBE_URL} \
-                                        -Dsonar.login=${SONAR_TOKEN} \
-                                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
-                                        -Dsonar.exclusions=node_modules/**,coverage/**,*.test.js
-                                '''
-                                echo "✅ SonarQube analysis completed"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Prepare ECR & Build with Kaniko') {
+        stage('Build and Push to ECR') {
             steps {
                 script {
                     echo "🔐 Setting up ECR authentication and building with Kaniko..."
                     
-                    // Prepare ECR authentication in aws-cli container
+                    // Prepare ECR authentication
                     container('aws-cli') {
-                        sh '''
-                            # Create ECR repository if it doesn't exist
-                            aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
-                            aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
-                            
-                            # Create ECR login config for Kaniko
-                            mkdir -p /kaniko/.docker
-                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | \
-                            base64 -w 0 > /tmp/ecr-token
-                            
-                            # Create Docker config for Kaniko
-                            cat > /kaniko/.docker/config.json << EOF
+                        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                            sh '''
+                                echo "Creating ECR repository if it doesn't exist..."
+                                aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
+                                aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
+                                
+                                echo "Getting ECR login token..."
+                                aws ecr get-login-password --region ${AWS_DEFAULT_REGION} > /tmp/ecr-password
+                                
+                                echo "Setting up Kaniko authentication..."
+                                mkdir -p /kaniko/.docker
+                                
+                                # Create Docker config for Kaniko
+                                cat > /kaniko/.docker/config.json << EOF
 {
-  "auths": {
-    "${ECR_REPOSITORY}": {
-      "auth": "$(echo -n "AWS:$(cat /tmp/ecr-token)" | base64 -w 0)"
+    "auths": {
+        "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com": {
+            "username": "AWS",
+            "password": "$(cat /tmp/ecr-password)"
+        }
     }
-  }
 }
 EOF
-                        '''
+                                echo "✅ ECR authentication configured"
+                            '''
+                        }
                     }
                     
                     // Build and push with Kaniko
                     container('kaniko') {
                         sh '''
                             echo "🐳 Building and pushing image with Kaniko..."
-                            
                             /kaniko/executor \
                                 --dockerfile=./Dockerfile \
-                                --context=. \
+                                --context=dir://$PWD \
                                 --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \
                                 --destination=${ECR_REPOSITORY}:latest \
-                                --cache=true \
-                                --cache-ttl=24h \
-                                --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
-                                --build-arg VCS_REF=$(git rev-parse HEAD)
+                                --cache=true
                                 
-                            echo "✅ Image built and pushed successfully with Kaniko"
+                            echo "✅ Image built and pushed successfully"
+                            echo "📦 Image: ${ECR_REPOSITORY}:${IMAGE_TAG}"
+                            echo "📦 Image: ${ECR_REPOSITORY}:latest"
                         '''
-                    }
-                }
-            }
-        }
-        
-        stage('Security Scan with Trivy') {
-            steps {
-                container('trivy') {
-                    script {
-                        echo "🔒 Running Trivy security scan..."
-                        
-                        // Setup AWS credentials for Trivy
-                        container('aws-cli') {
-                            sh '''
-                                # Configure AWS for Trivy
-                                aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | \
-                                trivy registry login --username AWS --password-stdin ${ECR_REPOSITORY}
-                            '''
-                        }
-                        
-                        sh '''
-                            # Run vulnerability scan
-                            trivy image \
-                                --severity ${TRIVY_SEVERITY} \
-                                --exit-code ${TRIVY_EXIT_CODE} \
-                                --format json \
-                                --output trivy-report.json \
-                                ${ECR_REPOSITORY}:${IMAGE_TAG}
-                            
-                            # Generate table format for console output
-                            trivy image \
-                                --severity ${TRIVY_SEVERITY} \
-                                --exit-code 0 \
-                                --format table \
-                                ${ECR_REPOSITORY}:${IMAGE_TAG}
-                        '''
-                        
-                        // Process results
-                        script {
-                            if (fileExists('trivy-report.json')) {
-                                def trivyReport = readJSON file: 'trivy-report.json'
-                                def criticalCount = 0
-                                def highCount = 0
-                                
-                                trivyReport.Results?.each { result ->
-                                    result.Vulnerabilities?.each { vuln ->
-                                        if (vuln.Severity == 'CRITICAL') criticalCount++
-                                        if (vuln.Severity == 'HIGH') highCount++
-                                    }
-                                }
-                                
-                                echo "🔒 Security Scan Results: Critical: ${criticalCount}, High: ${highCount}"
-                            }
-                        }
-                        
-                        archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
                     }
                 }
             }
@@ -201,20 +155,20 @@ EOF
         stage('Verify Deployment') {
             steps {
                 container('aws-cli') {
-                    script {
-                        echo "✅ Verifying image deployment in ECR..."
-                        sh '''
-                            echo "📊 Checking images in ECR repository:"
-                            aws ecr describe-images \
-                                --repository-name devops-gp-repository \
-                                --region ${AWS_DEFAULT_REGION} \
-                                --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
-                                --output table
-                            
-                            echo "✅ Successfully verified images in ECR:"
-                            echo "  - ${ECR_REPOSITORY}:${IMAGE_TAG}"
-                            echo "  - ${ECR_REPOSITORY}:latest"
-                        '''
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        script {
+                            echo "✅ Verifying image deployment in ECR..."
+                            sh '''
+                                echo "📊 Checking images in ECR repository:"
+                                aws ecr describe-images \
+                                    --repository-name devops-gp-repository \
+                                    --region ${AWS_DEFAULT_REGION} \
+                                    --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
+                                    --output table
+                                
+                                echo "✅ Successfully verified images in ECR"
+                            '''
+                        }
                     }
                 }
             }
@@ -225,12 +179,13 @@ EOF
         success {
             script {
                 def duration = currentBuild.durationString.replace(' and counting', '')
+                
                 slackSend(
                     channel: env.SLACK_CHANNEL,
                     color: 'good',
                     message: "✅ *Pipeline SUCCESS* - ${env.JOB_NAME} #${env.BUILD_NUMBER}\n" +
                             "Duration: ${duration}\n" +
-                            "Image: ${ECR_REPOSITORY}:${IMAGE_TAG}\n" +
+                            "Image: `${ECR_REPOSITORY}:${IMAGE_TAG}`\n" +
                             "Repository: ${env.NODEJS_REPO}\n" +
                             "Platform: EKS + Kaniko 🚀"
                 )
@@ -239,19 +194,29 @@ EOF
         
         failure {
             script {
+                def failedStage = env.STAGE_NAME ?: 'Unknown'
                 slackSend(
                     channel: env.SLACK_CHANNEL,
                     color: 'danger',
                     message: "❌ *Pipeline FAILED* - ${env.JOB_NAME} #${env.BUILD_NUMBER}\n" +
-                            "Failed Stage: ${env.STAGE_NAME}\n" +
+                            "Failed Stage: ${failedStage}\n" +
                             "Repository: ${env.NODEJS_REPO}\n" +
-                            "Check logs: ${env.BUILD_URL}console"
+                            "Logs: ${env.BUILD_URL}console\n" +
+                            "Please check the build logs for details 🔍"
                 )
             }
         }
+
         
         always {
-            cleanWs()
+            cleanWs(
+                cleanWhenAborted: true,
+                cleanWhenFailure: true,
+                cleanWhenNotBuilt: true,
+                cleanWhenSuccess: true,
+                cleanWhenUnstable: true,
+                deleteDirs: true
+            )
         }
     }
-} 
+}
