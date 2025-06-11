@@ -7,7 +7,7 @@ spec:
   project: default  
   source:
     repoURL: https://github.com/ahmed12345123/DevOps-GP.git
-    path: helm/argo-apps
+    path: helm/argocd
     targetRevision: HEAD
   destination:
     server: https://kubernetes.default.svc
