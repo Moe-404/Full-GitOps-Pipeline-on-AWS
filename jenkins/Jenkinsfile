@@ -20,18 +20,18 @@ pipeline {
         stage('Clone Repository') {
             steps {
                 script {
-                    echo "📥 Cloning NodeJS application repository..."
+                    echo "📥 Cloning NodeJS application repository using basic git commands..."
                     
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: 'main']],
-                        userRemoteConfigs: [[
-                            url: "${env.NODEJS_REPO}",
-                            credentialsId: 'github-credentials'
-                        ]]
-                    ])
+                    // Clean workspace first
+                    sh 'rm -rf ./* || true'
                     
-                    echo "✅ Repository cloned successfully"
+                    // Simple git clone instead of SCM checkout
+                    sh """
+                        git clone ${env.NODEJS_REPO} app-source
+                        cd app-source
+                        ls -la
+                        echo "✅ Repository cloned successfully"
+                    """
                 }
             }
         }
@@ -129,6 +129,8 @@ EOF
                     
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                         sh '''
+                            cd app-source
+                            
                             # Set Kaniko config directory
                             export DOCKER_CONFIG=/tmp/kaniko/.docker
                             
