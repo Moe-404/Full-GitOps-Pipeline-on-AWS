@@ -76,8 +76,23 @@ CMD ["npm", "start"]
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                         sh '''
                             echo "Checking required tools..."
-                            which kaniko-executor || which /kaniko/executor || (echo "❌ Kaniko not found, downloading..." && wget -O kaniko-executor https://github.com/GoogleContainerTools/kaniko/releases/latest/download/executor-linux-amd64 && chmod +x kaniko-executor)
                             aws --version || (echo "❌ AWS CLI not found" && exit 1)
+                            
+                            echo "Setting up Kaniko executor..."
+                            KANIKO_VERSION="v1.23.0"
+                            KANIKO_URL="https://github.com/GoogleContainerTools/kaniko/releases/download/${KANIKO_VERSION}/executor-linux-amd64"
+                            
+                            # Check if Kaniko is already available
+                            if which kaniko-executor > /dev/null 2>&1; then
+                                echo "✅ Kaniko found in PATH"
+                            elif [ -f "/kaniko/executor" ]; then
+                                echo "✅ Kaniko found at /kaniko/executor"
+                            else
+                                echo "📥 Downloading Kaniko executor..."
+                                curl -L ${KANIKO_URL} -o kaniko-executor || wget -O kaniko-executor ${KANIKO_URL}
+                                chmod +x kaniko-executor
+                                echo "✅ Kaniko executor downloaded successfully"
+                            fi
                             
                             echo "Creating ECR repository if it doesn't exist..."
                             aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
