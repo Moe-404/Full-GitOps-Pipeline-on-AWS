@@ -68,47 +68,81 @@ CMD ["npm", "start"]
             }
         }
         
-        stage('Setup ECR & Build Image') {
+        stage('Setup ECR Authentication') {
             steps {
                 script {
-                    echo "🔐 Setting up ECR and building Docker image..."
+                    echo "🔐 Setting up ECR authentication for Kaniko..."
                     
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                         sh '''
                             echo "Checking required tools..."
-                            docker --version || (echo "❌ Docker not found" && exit 1)
+                            which kaniko-executor || which /kaniko/executor || (echo "❌ Kaniko not found, downloading..." && wget -O kaniko-executor https://github.com/GoogleContainerTools/kaniko/releases/latest/download/executor-linux-amd64 && chmod +x kaniko-executor)
                             aws --version || (echo "❌ AWS CLI not found" && exit 1)
                             
                             echo "Creating ECR repository if it doesn't exist..."
                             aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
                             aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
                             
-                            echo "Logging into ECR..."
-                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+                            echo "Setting up Kaniko authentication..."
+                            mkdir -p /tmp/kaniko/.docker
                             
-                            echo "Building Docker image..."
-                            docker build -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
-                            docker tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_REPOSITORY}:latest
+                            # Get ECR login token
+                            ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_DEFAULT_REGION})
                             
-                            echo "✅ Image built successfully"
+                            # Create Docker config for Kaniko
+                            cat > /tmp/kaniko/.docker/config.json << EOF
+{
+    "auths": {
+        "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com": {
+            "username": "AWS",
+            "password": "$ECR_TOKEN"
+        }
+    }
+}
+EOF
+                            echo "✅ ECR authentication configured for Kaniko"
                         '''
                     }
                 }
             }
         }
         
-        stage('Push to ECR') {
+        stage('Build and Push with Kaniko') {
             steps {
                 script {
-                    echo "📤 Pushing image to ECR..."
+                    echo "🐳 Building and pushing image with Kaniko..."
                     
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                         sh '''
-                            echo "Pushing images to ECR..."
-                            docker push ${ECR_REPOSITORY}:${IMAGE_TAG}
-                            docker push ${ECR_REPOSITORY}:latest
+                            # Set Kaniko config directory
+                            export DOCKER_CONFIG=/tmp/kaniko/.docker
                             
-                            echo "✅ Images pushed successfully"
+                            # Use kaniko-executor (downloaded or system installed)
+                            KANIKO_EXECUTOR=""
+                            if [ -f "./kaniko-executor" ]; then
+                                KANIKO_EXECUTOR="./kaniko-executor"
+                            elif [ -f "/kaniko/executor" ]; then
+                                KANIKO_EXECUTOR="/kaniko/executor"
+                            elif which kaniko-executor > /dev/null 2>&1; then
+                                KANIKO_EXECUTOR="kaniko-executor"
+                            else
+                                echo "❌ Kaniko executor not found"
+                                exit 1
+                            fi
+                            
+                            echo "Using Kaniko executor: $KANIKO_EXECUTOR"
+                            
+                            # Build and push with Kaniko
+                            $KANIKO_EXECUTOR \\
+                                --dockerfile=./Dockerfile \\
+                                --context=dir://$PWD \\
+                                --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \\
+                                --destination=${ECR_REPOSITORY}:latest \\
+                                --cache=true \\
+                                --cache-ttl=24h \\
+                                --cleanup
+                                
+                            echo "✅ Image built and pushed successfully with Kaniko"
                             echo "📦 Image: ${ECR_REPOSITORY}:${IMAGE_TAG}"
                             echo "📦 Image: ${ECR_REPOSITORY}:latest"
                         '''
@@ -141,11 +175,15 @@ CMD ["npm", "start"]
         stage('Cleanup') {
             steps {
                 script {
-                    echo "🧹 Cleaning up local Docker images..."
+                    echo "🧹 Cleaning up temporary files..."
                     sh '''
-                        docker rmi ${ECR_REPOSITORY}:${IMAGE_TAG} || true
-                        docker rmi ${ECR_REPOSITORY}:latest || true
-                        docker system prune -f || true
+                        # Clean up Kaniko auth files
+                        rm -rf /tmp/kaniko/.docker || true
+                        
+                        # Clean up downloaded kaniko executor if any
+                        rm -f ./kaniko-executor || true
+                        
+                        echo "✅ Cleanup completed"
                     '''
                 }
             }
@@ -164,7 +202,7 @@ CMD ["npm", "start"]
                             "Duration: ${duration}\n" +
                             "Image: `${ECR_REPOSITORY}:${IMAGE_TAG}`\n" +
                             "Repository: ${env.NODEJS_REPO}\n" +
-                            "Platform: Jenkins + Docker + ECR 🚀"
+                            "Platform: Jenkins + Kaniko + ECR 🚀"
                 )
             }
         }
