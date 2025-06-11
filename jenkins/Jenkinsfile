@@ -12,7 +12,6 @@ pipeline {
         NODEJS_REPO = 'https://github.com/Moe-404/jenkins_nodejs_example.git'
         
         // Slack Configuration
-        SLACK_WEBHOOK = credentials('slack-webhook-url')
         SLACK_CHANNEL = '#all-jenkins'
     }
     
@@ -40,9 +39,9 @@ pipeline {
             steps {
                 script {
                     echo "🔍 Checking for Dockerfile..."
-                    if (!fileExists('Dockerfile')) {
+                    if (!fileExists('app-source/dockerfile')) {
                         echo "⚠️ No Dockerfile found, creating a basic one..."
-                        writeFile file: 'Dockerfile', text: '''FROM node:18-alpine
+                        writeFile file: 'app-source/dockerfile', text: '''FROM node:18-alpine
 
 WORKDIR /app
 
@@ -62,7 +61,7 @@ EXPOSE 3000
 CMD ["npm", "start"]
 '''
                     } else {
-                        echo "✅ Dockerfile found"
+                        echo "✅ Dockerfile found in app-source directory"
                     }
                 }
             }
@@ -73,7 +72,10 @@ CMD ["npm", "start"]
                 script {
                     echo "🔐 Setting up ECR authentication for Kaniko..."
                     
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
                             echo "Checking required tools..."
                             aws --version || (echo "❌ AWS CLI not found" && exit 1)
@@ -127,7 +129,10 @@ EOF
                 script {
                     echo "🐳 Building and pushing image with Kaniko..."
                     
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
                             cd app-source
                             
@@ -151,7 +156,7 @@ EOF
                             
                             # Build and push with Kaniko
                             $KANIKO_EXECUTOR \\
-                                --dockerfile=./Dockerfile \\
+                                --dockerfile=./dockerfile \\
                                 --context=dir://$PWD \\
                                 --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \\
                                 --destination=${ECR_REPOSITORY}:latest \\
@@ -173,7 +178,10 @@ EOF
                 script {
                     echo "✅ Verifying image deployment in ECR..."
                     
-                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
                             echo "📊 Checking images in ECR repository:"
                             aws ecr describe-images \
@@ -236,23 +244,6 @@ EOF
                             "Logs: ${env.BUILD_URL}console\n" +
                             "Please check the build logs for details 🔍"
                 )
-            }
-        }
-        
-        always {
-            script {
-                try {
-                    cleanWs(
-                        cleanWhenAborted: true,
-                        cleanWhenFailure: true,
-                        cleanWhenNotBuilt: true,
-                        cleanWhenSuccess: true,
-                        cleanWhenUnstable: true,
-                        deleteDirs: true
-                    )
-                } catch (Exception e) {
-                    echo "⚠️ Workspace cleanup failed: ${e.getMessage()}"
-                }
             }
         }
     }
