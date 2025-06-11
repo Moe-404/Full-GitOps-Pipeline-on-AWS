@@ -9,6 +9,9 @@ Key highlights include:
 - Jenkins pipeline for secure image builds, security scanning, and GitOps-ready deployments
 - ArgoCD and Argo Image Updater to enable automated deployments from GitHub
 - Secure secret management with External Secrets Operator and AWS Secrets Manager
+- TLS-enabled Ingress with cert-manager and Let's Encrypt using nip.io
+- Centralized logging using Fluent Bit, Elasticsearch, and Kibana
+- Cluster monitoring and alerting via Prometheus and Grafana
 - A complete example application stack featuring a Node.js web app, MySQL, and Redis
 
 ---
@@ -73,6 +76,8 @@ Provision the entire cloud infrastructure using **Terraform modules**, including
 - Automatically syncs secrets into Kubernetes, including:
   - MySQL credentials
   - Redis password
+- Uses IRSA with annotated ServiceAccount to securely access secrets
+- Secrets injected as native Kubernetes secrets and consumed by pods
 
 ---
 
@@ -84,9 +89,39 @@ Provision the entire cloud infrastructure using **Terraform modules**, including
 - Application dependencies:
   - **MySQL pod**: stores persistent data
   - **Redis pod**: used for caching
-  - Application retrieves credentials from **Kubernetes Secrets**
+  - Application retrieves credentials from **AWS Secrets Manager** via **External Secrets**
 
 - Deployments managed using **Helm**
+
+---
+
+### 🌐 6. Ingress & TLS – NGINX + Let's Encrypt + cert-manager
+
+- Ingress controller deployed via **Helm** using **NGINX**  
+- **cert-manager** with **Let's Encrypt ClusterIssuer** for TLS certificates  
+- Public access via `*.nip.io` (no DNS needed)  
+- Application served securely over HTTPS  
+- Certificates automatically provisioned and renewed
+
+---
+
+### 📊 7. Monitoring – Prometheus and Grafana
+
+- Prometheus stack installed via **Helm**  
+- **Grafana** with pre-built Kubernetes dashboards (nodes, pods, resources)  
+- Dashboards configured using `gnetId` and auto-loaded  
+- Grafana accessible via LoadBalancer service  
+- Alertmanager configured with sample email receiver
+
+---
+
+### 📄 8. Logging – Fluent Bit + Elasticsearch + Kibana
+
+- **Fluent Bit** deployed as a DaemonSet to collect container logs  
+- Logs shipped to **Elasticsearch** deployed via Helm  
+- Uses `fluentbit` logstash prefix and format  
+- Accessible Kibana for viewing and querying logs  
+- Elasticsearch stores logs from all workloads in the cluster
 
 ---
 
@@ -99,6 +134,10 @@ Provision the entire cloud infrastructure using **Terraform modules**, including
 - **ArgoCD + Argo Image Updater** (CD and GitOps)
 - **AWS ECR** (Elastic Container Registry)
 - **AWS Secrets Manager** + **External Secrets Operator**
+- **cert-manager + Let's Encrypt**
+- **NGINX Ingress Controller**
+- **Prometheus + Grafana** (Monitoring)
+- **Fluent Bit + Elasticsearch** (Logging)
 - **NodeJS**, **MySQL**, **Redis**
 
 ---
