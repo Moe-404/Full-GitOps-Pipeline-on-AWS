@@ -125,7 +125,7 @@ Provision the entire cloud infrastructure using **Terraform modules**, including
 
 ---
 
-## 🛠️ Technologies Used
+## 🛠️  Technologies Used
 
 - **Terraform** (Modularized)
 - **Amazon EKS** (Elastic Kubernetes Service)
