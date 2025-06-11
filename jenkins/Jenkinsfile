@@ -1,27 +1,204 @@
 pipeline {
-    agent {
-        docker {
-            image 'alpine:latest'
-            args '--entrypoint=""'
-        }
+    agent any
+    
+    environment {
+        // AWS Configuration
+        AWS_DEFAULT_REGION = 'us-east-1'
+        AWS_ACCOUNT_ID = "627073650373"
+        ECR_REPOSITORY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/devops-gp-repository"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        
+        // Application Repository
+        NODEJS_REPO = 'https://github.com/Moe-404/jenkins_nodejs_example.git'
+        
+        // Slack Configuration
+        SLACK_WEBHOOK = credentials('slack-webhook-url')
+        SLACK_CHANNEL = '#all-jenkins'
     }
     
     stages {
-        stage('Test SCM') {
+        stage('Clone Repository') {
             steps {
                 script {
-                    echo "✅ Successfully pulled Jenkinsfile from SCM!"
-                    echo "Current directory: ${pwd()}"
-                    sh 'ls -la'
-                    sh 'echo "Docker agent working!"'
+                    echo "📥 Cloning NodeJS application repository..."
+                    
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: 'main']],
+                        userRemoteConfigs: [[
+                            url: "${env.NODEJS_REPO}",
+                            credentialsId: 'github-credentials'
+                        ]]
+                    ])
+                    
+                    echo "✅ Repository cloned successfully"
+                }
+            }
+        }
+        
+        stage('Validate Dockerfile') {
+            steps {
+                script {
+                    echo "🔍 Checking for Dockerfile..."
+                    if (!fileExists('Dockerfile')) {
+                        echo "⚠️ No Dockerfile found, creating a basic one..."
+                        writeFile file: 'Dockerfile', text: '''FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --only=production
+
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# Start application
+CMD ["npm", "start"]
+'''
+                    } else {
+                        echo "✅ Dockerfile found"
+                    }
+                }
+            }
+        }
+        
+        stage('Setup ECR & Build Image') {
+            steps {
+                script {
+                    echo "🔐 Setting up ECR and building Docker image..."
+                    
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            echo "Checking required tools..."
+                            docker --version || (echo "❌ Docker not found" && exit 1)
+                            aws --version || (echo "❌ AWS CLI not found" && exit 1)
+                            
+                            echo "Creating ECR repository if it doesn't exist..."
+                            aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
+                            aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
+                            
+                            echo "Logging into ECR..."
+                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+                            
+                            echo "Building Docker image..."
+                            docker build -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
+                            docker tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_REPOSITORY}:latest
+                            
+                            echo "✅ Image built successfully"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                script {
+                    echo "📤 Pushing image to ECR..."
+                    
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            echo "Pushing images to ECR..."
+                            docker push ${ECR_REPOSITORY}:${IMAGE_TAG}
+                            docker push ${ECR_REPOSITORY}:latest
+                            
+                            echo "✅ Images pushed successfully"
+                            echo "📦 Image: ${ECR_REPOSITORY}:${IMAGE_TAG}"
+                            echo "📦 Image: ${ECR_REPOSITORY}:latest"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    echo "✅ Verifying image deployment in ECR..."
+                    
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            echo "📊 Checking images in ECR repository:"
+                            aws ecr describe-images \
+                                --repository-name devops-gp-repository \
+                                --region ${AWS_DEFAULT_REGION} \
+                                --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
+                                --output table
+                            
+                            echo "✅ Successfully verified images in ECR"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    echo "🧹 Cleaning up local Docker images..."
+                    sh '''
+                        docker rmi ${ECR_REPOSITORY}:${IMAGE_TAG} || true
+                        docker rmi ${ECR_REPOSITORY}:latest || true
+                        docker system prune -f || true
+                    '''
                 }
             }
         }
     }
     
     post {
+        success {
+            script {
+                def duration = currentBuild.durationString.replace(' and counting', '')
+                
+                slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'good',
+                    message: "✅ *Pipeline SUCCESS* - ${env.JOB_NAME} #${env.BUILD_NUMBER}\n" +
+                            "Duration: ${duration}\n" +
+                            "Image: `${ECR_REPOSITORY}:${IMAGE_TAG}`\n" +
+                            "Repository: ${env.NODEJS_REPO}\n" +
+                            "Platform: Jenkins + Docker + ECR 🚀"
+                )
+            }
+        }
+        
+        failure {
+            script {
+                def failedStage = env.STAGE_NAME ?: 'Unknown'
+                slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'danger',
+                    message: "❌ *Pipeline FAILED* - ${env.JOB_NAME} #${env.BUILD_NUMBER}\n" +
+                            "Failed Stage: ${failedStage}\n" +
+                            "Repository: ${env.NODEJS_REPO}\n" +
+                            "Logs: ${env.BUILD_URL}console\n" +
+                            "Please check the build logs for details 🔍"
+                )
+            }
+        }
+        
         always {
-            echo "Pipeline test completed"
+            script {
+                try {
+                    cleanWs(
+                        cleanWhenAborted: true,
+                        cleanWhenFailure: true,
+                        cleanWhenNotBuilt: true,
+                        cleanWhenSuccess: true,
+                        cleanWhenUnstable: true,
+                        deleteDirs: true
+                    )
+                } catch (Exception e) {
+                    echo "⚠️ Workspace cleanup failed: ${e.getMessage()}"
+                }
+            }
         }
     }
 }
