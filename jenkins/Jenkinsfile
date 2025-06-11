@@ -66,10 +66,10 @@ CMD ["npm", "start"]
             }
         }
         
-        stage('Setup ECR Authentication') {
+        stage('Setup ECR & Build with Buildah') {
             steps {
                 script {
-                    echo "🔐 Setting up ECR authentication for Kaniko..."
+                    echo "🔨 Setting up ECR and building with Buildah..."
                     
                     withCredentials([[
                         $class: 'AmazonWebServicesCredentialsBinding',
@@ -78,118 +78,36 @@ CMD ["npm", "start"]
                         secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                     ]]) {
                         sh '''
-                            echo "Setting up AWS CLI..."
-                            # Find AWS CLI installation
-                            if [ -d "/tmp/aws-cli/v2/current/bin" ]; then
-                                export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            elif [ -d "/tmp/aws-cli/bin" ]; then
-                                export PATH=/tmp/aws-cli/bin:$PATH
-                            else
-                                echo "Installing AWS CLI..."
-                                curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                                unzip -q awscliv2.zip
-                                ./aws/install --bin-dir /tmp/aws-cli/bin --install-dir /tmp/aws-cli --update
-                                export PATH=/tmp/aws-cli/v2/current/bin:/tmp/aws-cli/bin:$PATH
+                            # Set up AWS CLI
+                            export PATH=/tmp/aws-cli/v2/current/bin:$PATH
+                            
+                            echo "Installing Buildah..."
+                            # Install buildah (if not available)
+                            if ! command -v buildah &> /dev/null; then
+                                echo "Installing Buildah via package manager..."
+                                # This might need sudo permissions
+                                apt-get update && apt-get install -y buildah || \
+                                yum install -y buildah || \
+                                echo "Please install buildah manually"
                             fi
                             
-                            echo "Checking AWS CLI installation..."
-                            aws --version || (echo "❌ AWS CLI not found in PATH" && exit 1)
-                            
-                            echo "Testing AWS credentials..."
-                            aws sts get-caller-identity || (echo "❌ AWS credentials invalid" && exit 1)
-                            
-                            echo "Setting up Kaniko executor..."
-                            KANIKO_VERSION="v1.23.0"
-                            KANIKO_URL="https://github.com/GoogleContainerTools/kaniko/releases/download/${KANIKO_VERSION}/executor-linux-amd64"
-                            
-                            # Check if Kaniko is already available
-                            if which kaniko-executor > /dev/null 2>&1; then
-                                echo "✅ Kaniko found in PATH"
-                            elif [ -f "/kaniko/executor" ]; then
-                                echo "✅ Kaniko found at /kaniko/executor"
-                            else
-                                echo "📥 Downloading Kaniko executor..."
-                                curl -L ${KANIKO_URL} -o kaniko-executor || wget -O kaniko-executor ${KANIKO_URL}
-                                chmod +x kaniko-executor
-                                echo "✅ Kaniko executor downloaded successfully"
-                            fi
-                            
-                            echo "Creating ECR repository if it doesn't exist..."
+                            echo "Creating ECR repository..."
                             aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
                             aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
                             
-                            echo "Setting up Kaniko authentication..."
-                            mkdir -p /tmp/kaniko/.docker
+                            echo "Login to ECR..."
+                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | buildah login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
                             
-                            # Get ECR login token
-                            ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_DEFAULT_REGION})
-                            
-                            # Create Docker config for Kaniko
-                            cat > /tmp/kaniko/.docker/config.json << EOF
-{
-    "auths": {
-        "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com": {
-            "username": "AWS",
-            "password": "$ECR_TOKEN"
-        }
-    }
-}
-EOF
-                            echo "✅ ECR authentication configured for Kaniko"
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Build and Push with Kaniko') {
-            steps {
-                script {
-                    echo "🐳 Building and pushing image with Kaniko..."
-                    
-                        withCredentials([[
-                            $class: 'AmazonWebServicesCredentialsBinding',
-                            credentialsId: 'aws-credentials',
-                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        sh '''
-                            # Add AWS CLI to PATH
-                            export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            
+                            echo "Building with Buildah..."
                             cd app-source
+                            buildah build -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
+                            buildah tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_REPOSITORY}:latest
                             
-                            # Set Kaniko config directory
-                            export DOCKER_CONFIG=/tmp/kaniko/.docker
+                            echo "Pushing to ECR..."
+                            buildah push ${ECR_REPOSITORY}:${IMAGE_TAG}
+                            buildah push ${ECR_REPOSITORY}:latest
                             
-                            # Use kaniko-executor (downloaded or system installed)
-                            KANIKO_EXECUTOR=""
-                            if [ -f "../kaniko-executor" ]; then
-                                KANIKO_EXECUTOR="../kaniko-executor"
-                            elif [ -f "/kaniko/executor" ]; then
-                                KANIKO_EXECUTOR="/kaniko/executor"
-                            elif which kaniko-executor > /dev/null 2>&1; then
-                                KANIKO_EXECUTOR="kaniko-executor"
-                            else
-                                echo "❌ Kaniko executor not found"
-                                exit 1
-                            fi
-                            
-                            echo "Using Kaniko executor: $KANIKO_EXECUTOR"
-                            
-                            # Build and push with Kaniko
-                            $KANIKO_EXECUTOR \\
-                                --dockerfile=./dockerfile \\
-                                --context=dir://$PWD \\
-                                --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \\
-                                --destination=${ECR_REPOSITORY}:latest \\
-                                --cache=true \\
-                                --cache-ttl=24h \\
-                                --cleanup
-                                
-                            echo "✅ Image built and pushed successfully with Kaniko"
-                            echo "📦 Image: ${ECR_REPOSITORY}:${IMAGE_TAG}"
-                            echo "📦 Image: ${ECR_REPOSITORY}:latest"
+                            echo "✅ Build and push completed with Buildah"
                         '''
                     }
                 }
@@ -255,7 +173,7 @@ EOF
                             "Duration: ${duration}\n" +
                             "Image: `${ECR_REPOSITORY}:${IMAGE_TAG}`\n" +
                             "Repository: ${env.NODEJS_REPO}\n" +
-                            "Platform: Jenkins + Kaniko + ECR 🚀"
+                            "Platform: Jenkins + Buildah + ECR 🚀"
                 )
             }
         }
