@@ -8,9 +8,10 @@ module "vpc" {
 }
 
 module "security_groups" {
-  source          = "./modules/security-groups"
-  vpc_id          = module.vpc.vpc_id
+  source       = "./modules/security-groups"
+  vpc_id       = module.vpc.vpc_id
   project_name = var.project_name
+  vpc_cidr     = var.vpc_cidr
 }
 
 module "iam" {
@@ -30,8 +31,8 @@ module "eks" {
   enable_public_endpoint = false
   cluster_role_arn = module.iam.eks_cluster_role_arn
   node_role_arn    = module.iam.eks_node_role_arn
-  security_group_ids = [module.security_groups.bastion_sg_id]
   eks_worker_sg_id = module.security_groups.eks_worker_sg_id
+  security_group_ids = [module.security_groups.bastion_sg_id, module.security_groups.eks_worker_sg_id]
   depends_on = [module.iam]
 }
 
@@ -55,6 +56,7 @@ module "ecr" {
   repository_name = "${var.project_name}-repository"
   project_name    = var.project_name
 }
+
 module "secret_manager" {
   source          = "./modules/secret-manager"
     region          = var.region

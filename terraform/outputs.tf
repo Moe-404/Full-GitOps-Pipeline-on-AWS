@@ -9,3 +9,6 @@ output "secret_manager_secret_access_key" {
   value     = module.secret_manager.secret_access_key
   sensitive = true
 }
+output "irsa_role_arn" {
+  value = module.irsa.iam_role_arn
+}
