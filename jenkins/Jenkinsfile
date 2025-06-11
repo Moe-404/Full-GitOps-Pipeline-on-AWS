@@ -1,32 +1,8 @@
 pipeline {
     agent {
-        kubernetes {
-            label 'devops-gp-pipeline'
-            yaml """
-apiVersion: v1
-kind: Pod
-spec:
-  containers:
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:debug
-    command:
-    - /busybox/cat
-    tty: true
-    volumeMounts:
-    - name: kaniko-secret
-      mountPath: /kaniko/.docker
-  - name: aws-cli
-    image: amazon/aws-cli:latest
-    command:
-    - cat
-    tty: true
-    env:
-    - name: AWS_DEFAULT_REGION
-      value: "us-east-1"
-  volumes:
-  - name: kaniko-secret
-    emptyDir: {}
-"""
+        docker {
+            image 'amazon/aws-cli:latest'
+            args '--entrypoint="" -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
     
@@ -97,53 +73,43 @@ CMD ["npm", "start"]
             }
         }
         
-        stage('Build and Push to ECR') {
+        stage('Setup ECR & Build Image') {
             steps {
                 script {
-                    echo "🔐 Setting up ECR authentication and building with Kaniko..."
+                    echo "🔐 Setting up ECR and building Docker image..."
                     
-                    // Prepare ECR authentication
-                    container('aws-cli') {
-                        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-                            sh '''
-                                echo "Creating ECR repository if it doesn't exist..."
-                                aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
-                                aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
-                                
-                                echo "Getting ECR login token..."
-                                aws ecr get-login-password --region ${AWS_DEFAULT_REGION} > /tmp/ecr-password
-                                
-                                echo "Setting up Kaniko authentication..."
-                                mkdir -p /kaniko/.docker
-                                
-                                # Create Docker config for Kaniko
-                                cat > /kaniko/.docker/config.json << EOF
-{
-    "auths": {
-        "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com": {
-            "username": "AWS",
-            "password": "$(cat /tmp/ecr-password)"
-        }
-    }
-}
-EOF
-                                echo "✅ ECR authentication configured"
-                            '''
-                        }
-                    }
-                    
-                    // Build and push with Kaniko
-                    container('kaniko') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                         sh '''
-                            echo "🐳 Building and pushing image with Kaniko..."
-                            /kaniko/executor \
-                                --dockerfile=./Dockerfile \
-                                --context=dir://$PWD \
-                                --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \
-                                --destination=${ECR_REPOSITORY}:latest \
-                                --cache=true
-                                
-                            echo "✅ Image built and pushed successfully"
+                            echo "Creating ECR repository if it doesn't exist..."
+                            aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
+                            aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
+                            
+                            echo "Logging into ECR..."
+                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+                            
+                            echo "Building Docker image..."
+                            docker build -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
+                            docker tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_REPOSITORY}:latest
+                            
+                            echo "✅ Image built successfully"
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                script {
+                    echo "📤 Pushing image to ECR..."
+                    
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            echo "Pushing images to ECR..."
+                            docker push ${ECR_REPOSITORY}:${IMAGE_TAG}
+                            docker push ${ECR_REPOSITORY}:latest
+                            
+                            echo "✅ Images pushed successfully"
                             echo "📦 Image: ${ECR_REPOSITORY}:${IMAGE_TAG}"
                             echo "📦 Image: ${ECR_REPOSITORY}:latest"
                         '''
@@ -154,22 +120,34 @@ EOF
         
         stage('Verify Deployment') {
             steps {
-                container('aws-cli') {
+                script {
+                    echo "✅ Verifying image deployment in ECR..."
+                    
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-                        script {
-                            echo "✅ Verifying image deployment in ECR..."
-                            sh '''
-                                echo "📊 Checking images in ECR repository:"
-                                aws ecr describe-images \
-                                    --repository-name devops-gp-repository \
-                                    --region ${AWS_DEFAULT_REGION} \
-                                    --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
-                                    --output table
-                                
-                                echo "✅ Successfully verified images in ECR"
-                            '''
-                        }
+                        sh '''
+                            echo "📊 Checking images in ECR repository:"
+                            aws ecr describe-images \
+                                --repository-name devops-gp-repository \
+                                --region ${AWS_DEFAULT_REGION} \
+                                --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
+                                --output table
+                            
+                            echo "✅ Successfully verified images in ECR"
+                        '''
                     }
+                }
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    echo "🧹 Cleaning up local Docker images..."
+                    sh '''
+                        docker rmi ${ECR_REPOSITORY}:${IMAGE_TAG} || true
+                        docker rmi ${ECR_REPOSITORY}:latest || true
+                        docker system prune -f || true
+                    '''
                 }
             }
         }
@@ -187,7 +165,7 @@ EOF
                             "Duration: ${duration}\n" +
                             "Image: `${ECR_REPOSITORY}:${IMAGE_TAG}`\n" +
                             "Repository: ${env.NODEJS_REPO}\n" +
-                            "Platform: EKS + Kaniko 🚀"
+                            "Platform: Docker + ECR 🚀"
                 )
             }
         }
@@ -204,6 +182,23 @@ EOF
                             "Logs: ${env.BUILD_URL}console\n" +
                             "Please check the build logs for details 🔍"
                 )
+            }
+        }
+        
+        always {
+            script {
+                try {
+                    cleanWs(
+                        cleanWhenAborted: true,
+                        cleanWhenFailure: true,
+                        cleanWhenNotBuilt: true,
+                        cleanWhenSuccess: true,
+                        cleanWhenUnstable: true,
+                        deleteDirs: true
+                    )
+                } catch (Exception e) {
+                    echo "⚠️ Workspace cleanup failed: ${e.getMessage()}"
+                }
             }
         }
     }
