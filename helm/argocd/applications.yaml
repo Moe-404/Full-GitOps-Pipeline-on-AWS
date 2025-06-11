@@ -7,8 +7,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR-USER/YOUR-REPO.git
-    path: apps/external-secrets
+    repoURL: https://github.com/ahmed12345123/DevOps-GP.git
+    path: helm/apps/external-secrets
   destination:
     server: https://kubernetes.default.svc
     namespace: external-secrets
@@ -33,7 +33,7 @@ spec:
     targetRevision: 9.10.0
     helm:
       valueFiles:
-        - apps/mysql/values.yaml
+        - helm/apps/mysql/values.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: default
@@ -56,7 +56,7 @@ spec:
     targetRevision: 17.11.0
     helm:
       valueFiles:
-        - apps/redis/values.yaml
+        - helm/apps/redis/values.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: default
@@ -74,8 +74,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR-USER/YOUR-REPO.git
-    path: apps/nodejs-app
+    repoURL: https://github.com/ahmed12345123/DevOps-GP.git
+    path: helm/apps/nodejs-app
   destination:
     server: https://kubernetes.default.svc
     namespace: default
@@ -141,8 +141,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR-USER/YOUR-REPO.git
-    path: ingress
+    repoURL: https://github.com/ahmed12345123/DevOps-GP.git
+    path: helm/ingress
   destination:
     server: https://kubernetes.default.svc
     namespace: default
@@ -168,7 +168,7 @@ spec:
     targetRevision: 55.5.0
     helm:
       valueFiles:
-        - apps/monitoring/values.yaml
+        - helm/apps/monitoring/values.yaml
   syncPolicy:
     automated:
       prune: true
@@ -191,7 +191,7 @@ spec:
     targetRevision: 7.17.3
     helm:
       valueFiles:
-        - apps/logging/values.yaml
+        - helm/apps/logging/values.yaml
   syncPolicy:
     automated:
       prune: true
@@ -214,7 +214,7 @@ spec:
     targetRevision: 0.46.6
     helm:
       valueFiles:
-        - apps/fluent-bit/values.yaml
+        - helm/apps/fluent-bit/values.yaml
   syncPolicy:
     automated:
       prune: true
