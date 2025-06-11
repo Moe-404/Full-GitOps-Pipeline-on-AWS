@@ -23,6 +23,7 @@ pipeline {
                     
                     // Clean workspace first
                     sh 'rm -rf ./* || true'
+                    
                     // Simple git clone instead of SCM checkout
                     sh """
                         git clone ${env.NODEJS_REPO} app-source
@@ -71,32 +72,13 @@ CMD ["npm", "start"]
                 script {
                     echo "🔐 Setting up ECR authentication for Kaniko..."
                     
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-credentials',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
-                            echo "Setting up AWS CLI..."
-                            # Find AWS CLI installation
-                            if [ -d "/tmp/aws-cli/v2/current/bin" ]; then
-                                export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            elif [ -d "/tmp/aws-cli/bin" ]; then
-                                export PATH=/tmp/aws-cli/bin:$PATH
-                            else
-                                echo "Installing AWS CLI..."
-                                curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                                unzip -q awscliv2.zip
-                                ./aws/install --bin-dir /tmp/aws-cli/bin --install-dir /tmp/aws-cli --update
-                                export PATH=/tmp/aws-cli/v2/current/bin:/tmp/aws-cli/bin:$PATH
-                            fi
-                            
-                            echo "Checking AWS CLI installation..."
-                            aws --version || (echo "❌ AWS CLI not found in PATH" && exit 1)
-                            
-                            echo "Testing AWS credentials..."
-                            aws sts get-caller-identity || (echo "❌ AWS credentials invalid" && exit 1)
+                            echo "Checking required tools..."
+                            aws --version || (echo "❌ AWS CLI not found" && exit 1)
                             
                             echo "Setting up Kaniko executor..."
                             KANIKO_VERSION="v1.23.0"
@@ -147,16 +129,11 @@ EOF
                 script {
                     echo "🐳 Building and pushing image with Kaniko..."
                     
-                        withCredentials([[
-                            $class: 'AmazonWebServicesCredentialsBinding',
-                            credentialsId: 'aws-credentials',
-                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
-                            # Add AWS CLI to PATH
-                            export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            
                             cd app-source
                             
                             # Set Kaniko config directory
@@ -164,8 +141,8 @@ EOF
                             
                             # Use kaniko-executor (downloaded or system installed)
                             KANIKO_EXECUTOR=""
-                            if [ -f "../kaniko-executor" ]; then
-                                KANIKO_EXECUTOR="../kaniko-executor"
+                            if [ -f "./kaniko-executor" ]; then
+                                KANIKO_EXECUTOR="./kaniko-executor"
                             elif [ -f "/kaniko/executor" ]; then
                                 KANIKO_EXECUTOR="/kaniko/executor"
                             elif which kaniko-executor > /dev/null 2>&1; then
@@ -201,16 +178,11 @@ EOF
                 script {
                     echo "✅ Verifying image deployment in ECR..."
                     
-                        withCredentials([[
-                            $class: 'AmazonWebServicesCredentialsBinding',
-                            credentialsId: 'aws-credentials',
-                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
-                            # Add AWS CLI to PATH
-                            export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            
                             echo "📊 Checking images in ECR repository:"
                             aws ecr describe-images \
                                 --repository-name devops-gp-repository \
