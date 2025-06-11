@@ -1,0 +1,4 @@
+image:
+  repository: ahmedmostafakadry/jenkins-lab1
+  tag: latest
+replicaCount: 3

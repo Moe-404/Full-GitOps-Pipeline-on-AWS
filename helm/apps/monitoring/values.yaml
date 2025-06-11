@@ -1,0 +1,36 @@
+grafana:
+  enabled: true
+  adminPassword: prom-operator
+  service:
+    type: LoadBalancer
+  ingress:
+    enabled: false
+  dashboards:
+    default:
+      kubernetes-cluster:
+        gnetId: 315
+        revision: 2
+        datasource: Prometheus
+      kubernetes-pods:
+        gnetId: 6417
+        revision: 1
+        datasource: Prometheus
+
+prometheus:
+  service:
+    type: LoadBalancer
+
+alertmanager:
+  enabled: true
+  service:
+    type: LoadBalancer
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: 'team-email'
+    receivers:
+      - name: 'team-email'
+        email_configs:
+          - to: team@example.com
+

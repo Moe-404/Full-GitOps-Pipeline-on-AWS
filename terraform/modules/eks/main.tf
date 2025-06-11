@@ -1,5 +1,3 @@
-# EKS Cluster
-# EKS cluster and node groups' security group and network interfaces get auto created, so we don't need to define them here.
 resource "aws_eks_cluster" "cluster" {
   name     = var.cluster_name
   role_arn = var.cluster_role_arn
@@ -13,20 +11,21 @@ resource "aws_eks_cluster" "cluster" {
   }
 }
 
-# resource "aws_launch_template" "eks_lt" {
-#   name_prefix   = "${var.cluster_name}-lt"
-#   image_id      = data.aws_ami.eks_ami.id
-#   key_name      = var.key_pair_name
+resource "aws_launch_template" "eks_lt" {
+  name_prefix   = "${var.cluster_name}-lt"
+  image_id      = data.aws_ami.eks_ami.id
+  instance_type = var.instance_types[0]
+  key_name      = var.key_pair_name
 
-#   vpc_security_group_ids = [var.eks_worker_sg_id]
+  vpc_security_group_ids = [var.eks_worker_sg_id]
 
-#   tag_specifications {
-#     resource_type = "instance"
-#     tags = {
-#       Name = "${var.cluster_name}-worker"
-#     }
-#   }
-# }
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.cluster_name}-worker"
+    }
+  }
+}
 
 data "aws_ami" "eks_ami" {
   most_recent = true
@@ -68,7 +67,6 @@ resource "aws_eks_node_group" "node_group" {
     min_size     = var.min_size
   }
 
-  instance_types = var.instance_types
 
   # launch_template {
   #   id      = aws_launch_template.eks_lt.id

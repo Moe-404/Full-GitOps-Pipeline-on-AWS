@@ -1,0 +1,7 @@
+auth:
+  existingSecret: "redis-secret"
+  existingSecretPasswordKey: "REDIS_PASSWORD"
+architecture: standalone
+master:
+  service:
+    type: ClusterIP

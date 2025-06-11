@@ -1,0 +1,16 @@
+service:
+  type: ClusterIP
+
+backend:
+  type: es
+  es:
+    host: elasticsearch-master.logging.svc.cluster.local
+    port: 9200
+    logstash_prefix: fluentbit
+    logstash_format: true
+
+input:
+  tail:
+    enabled: true
+    path: /var/log/containers/*.log
+    parser: docker
