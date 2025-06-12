@@ -1,0 +1,7 @@
+ansible_user: "ubuntu"
+version:
+  content: "v1.31.0"
+kubectl:
+  path: "/usr/local/bin/kubectl"
+eks_cluster_name: "grad-proj-cluster"
+aws_region: "us-east-1"

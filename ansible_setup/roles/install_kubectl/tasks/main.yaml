@@ -1,0 +1,128 @@
+- name: Check if home directory exists
+  stat:
+    path: /home/{{ ansible_user }}
+  register: home_dir
+
+- name: Create home directory if it doesn't exist
+  file:
+    path: /home/{{ ansible_user }}
+    state: directory
+  when: not home_dir.stat.exists
+
+- name: Check for kubectl binary in home directory
+  stat:
+    path: /home/{{ ansible_user }}/kubectl
+  register:
+    kubectl_binary_home
+
+- name: Check for kubectl checksum in home directory
+  stat:
+    path: /home/{{ ansible_user }}/kubectl
+  register:
+    kubectl_chksum_home
+
+- name: Delete kubectl binary from home directory
+  file:
+    path: /home/{{ ansible_user }}/kubectl
+    state: absent
+  when: kubectl_binary_home.stat.exists
+
+- name: Delete checksum file from home directory
+  file:
+    path: /home/{{ ansible_user }}/kubectl.sha256
+    state: absent
+  when: kubectl_chksum_home.stat.exists
+
+- name: Get latest kubectl version
+  uri:
+    url: https://dl.k8s.io/release/stable.txt
+    return_content: yes
+    status_code: 200, 304
+  register: version
+
+- name: Download the latest kubectl release
+  uri:
+    url: https://dl.k8s.io/release/{{ version.content }}/bin/linux/amd64/kubectl
+    dest: /home/{{ ansible_user }}
+    status_code: 200, 304
+  register: kubectl
+
+- name: Download the kubectl checksum file
+  uri:
+    url: https://dl.k8s.io/{{ version.content }}/bin/linux/amd64/kubectl.sha256
+    dest: /home/{{ ansible_user }}
+    status_code: 200, 304
+
+- name: Validate the kubectl binary against the checksum file
+  shell: echo "$(cat /home/{{ ansible_user }}/kubectl.sha256)"
+  register: source_chksum
+
+- name: Compute new checksum of kubectl binary
+  shell: sha256sum /home/{{ ansible_user }}/kubectl | awk '{print $1}'
+  register: new_chksum
+
+- name: Assert that the kubectl binary is OK
+  vars:
+    expected: "kubectl: OK"
+  assert:
+    that:
+      - source_chksum.stdout == new_chksum.stdout
+    fail_msg: "Checksum does not match {{ source_chksum.stdout }} != {{ new_chksum.stdout }}"
+    success_msg: "Successfully validated"
+
+- name: Check if kubectl installed in /usr/local/bin
+  stat:
+    path: /usr/local/bin/kubectl
+  register: kubectl_binary_usr_local_bin
+
+- name: Delete kubectl binary from /usr/local/bin if it exists
+  file:
+    path: /usr/local/bin/kubectl
+    state: absent
+  when: kubectl_binary_home.stat.exists
+
+- name: Copy kubectl and change permissions
+  copy:
+    src: "{{ kubectl.path }}"
+    remote_src: yes
+    dest: /usr/local/bin/kubectl
+    owner: root
+    group: root
+    mode: "+x"
+
+- name: Check if kubectl is installed
+  shell: kubectl version --client
+  register: client
+  failed_when: client.rc > 1
+
+- name: remove downloaded binaries from home
+  file:
+    path: /home/{{ ansible_user }}/kubectl
+    state: absent
+
+- name: remove downloaded checksums from home
+  file:
+    path: /home/{{ ansible_user }}/kubectl.sha256
+    state: absent
+
+- name: Check if kubectl is installed
+  shell: kubectl version --client
+  register: client
+  failed_when: client.rc > 1
+
+- name: access Cluster
+  shell: |
+    aws eks --region {{ aws_region }} update-kubeconfig --name {{ eks_cluster_name }}
+  register: access_cluster
+  failed_when: access_cluster.rc > 0
+
+- name: Test Cluster
+  shell: |
+    aws eks describe-cluster --name {{ eks_cluster_name }} --region {{ aws_region }} --query "cluster.status" --output text
+    kubectl get nodes
+  register: test_cluster
+  failed_when: test_cluster.rc > 0
+
+- name: Show test result
+  debug:
+    var: test_cluster

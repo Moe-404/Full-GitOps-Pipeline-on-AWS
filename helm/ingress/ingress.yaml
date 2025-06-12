@@ -3,21 +3,17 @@ kind: Ingress
 metadata:
   name: nodejs-app
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   ingressClassName: nginx
-  tls:
-  - hosts:
-    - .nip.io
-    secretName: nodejs-app-tls
   rules:
-  - host: .nip.io
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: nodejs-app
-            port:
-              number: 3000
+    - host: a825eb5e2341049b281c2ddf2719dde5-135948878.us-east-1.elb.amazonaws.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nodejs-app
+                port:
+                  number: 3000

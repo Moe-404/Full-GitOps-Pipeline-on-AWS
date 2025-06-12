@@ -1,0 +1,25 @@
+- name: Create directory for Jenkins
+  file:
+    path: ~/jenkinsInstall
+    state: directory
+  register: jenkins_dir
+
+- name: print out jenkins_dir
+  debug:
+    msg: "Jenkins directory created at {{ jenkins_dir.path }}"
+
+- name: Copy files to remote
+  copy:
+    src: "{{ item }}"
+    dest: ~/jenkinsInstall/
+  loop:
+    - install.sh
+    - values.yaml
+    - values-minimal.yaml
+
+- name: Run install script
+  shell: |
+    cd ~/jenkinsInstall && bash install.sh
+  args:
+    executable: /bin/bash
+

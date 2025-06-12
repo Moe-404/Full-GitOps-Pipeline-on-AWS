@@ -1,0 +1,34 @@
+- name: Download awscli 
+  get_url:
+    url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+    dest: /tmp/awscliv2.zip
+    mode: '0755'
+  register: aws_cli_download
+
+- name: Unarchive awscli installer
+  unarchive:
+    src: /tmp/awscliv2.zip
+    dest: /tmp
+    remote_src: yes
+  #when: aws_cli_download.changed
+  register: aws_cli_unarchive_installer
+
+- name: Install awscli
+  command: /tmp/aws/install --update
+
+- name: Configure AWS credentials and region
+  shell: |
+        mkdir -p ~/.aws
+        cat > ~/.aws/credentials <<EOF
+        [default]
+        aws_access_key_id={{ aws_access_key }}
+        aws_secret_access_key={{ aws_secret_key }}
+        EOF
+        cat > ~/.aws/config <<EOF
+        [default]
+        region={{ aws_region }}
+        output=json
+        EOF
+  args:
+      executable: /bin/bash
+  

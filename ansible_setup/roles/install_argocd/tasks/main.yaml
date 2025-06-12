@@ -1,0 +1,21 @@
+- name: Create namespace argocd if it doesn't exist
+  shell: |
+    kubectl get namespace argocd || kubectl create namespace argocd
+  register: create_namespace
+  changed_when: "'created' in create_namespace.stdout or 'created' in create_namespace.stderr"
+
+- name: Install ArgoCD with kubectl
+  shell: |
+    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+- name: Install Argo Image Updater with kubectl
+  shell: |
+    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/stable/manifests/install.yaml
+
+- name: check if argocd-server service is running
+  command: kubectl get pods -n argocd 
+  register: argocd_server_status
+  retries: 5
+  delay: 10
+  until: argocd_server_status.rc == 0
+
