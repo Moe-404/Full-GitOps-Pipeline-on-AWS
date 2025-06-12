@@ -108,29 +108,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: cert-manager
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-spec:
-  project: default
-  source:
-    repoURL: https://charts.jetstack.io
-    chart: cert-manager
-    targetRevision: v1.15.0
-    helm:
-      values: |
-        installCRDs: true  # You must apply CRDs manually outside ArgoCD
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: cert-manager
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
     syncOptions:
       - CreateNamespace=true
 ---
