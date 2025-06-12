@@ -84,6 +84,7 @@ spec:
       prune: true
       selfHeal: true
 ---
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -101,6 +102,12 @@ spec:
         controller:
           service:
             type: LoadBalancer
+          ingressClassResource:
+            default: true
+          metrics:
+            enabled: true
+          admissionWebhooks:
+            enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: ingress-nginx
