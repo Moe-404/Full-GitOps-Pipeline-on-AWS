@@ -1,4 +1,4 @@
 image:
-  repository: ahmedmostafakadry/jenkins-lab1
+  repository: 627073650373.dkr.ecr.us-east-1.amazonaws.com/devops-gp-repository
   tag: latest
 replicaCount: 3
