@@ -1,5 +1,42 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins-agent
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command:
+    - sleep
+    args:
+    - 9999999
+    volumeMounts:
+    - name: jenkins-docker-cfg
+      mountPath: /kaniko/.docker
+    env:
+    - name: AWS_DEFAULT_REGION
+      value: us-east-1
+  - name: aws-cli
+    image: amazon/aws-cli:latest
+    command:
+    - sleep
+    args:
+    - 9999999
+    volumeMounts:
+    - name: jenkins-docker-cfg
+      mountPath: /kaniko/.docker
+    env:
+    - name: AWS_DEFAULT_REGION
+      value: us-east-1
+  volumes:
+  - name: jenkins-docker-cfg
+    emptyDir: {}
+"""
+        }
+    }
     
     environment {
         // AWS Configuration
@@ -19,11 +56,11 @@ pipeline {
         stage('Clone Repository') {
             steps {
                 script {
-                    echo "📥 Cloning NodeJS application repository using basic git commands..."
+                    echo "📥 Cloning NodeJS application repository..."
                     
                     // Clean workspace first
                     sh 'rm -rf ./* || true'
-                    // Simple git clone instead of SCM checkout
+                    // Simple git clone
                     sh """
                         git clone ${env.NODEJS_REPO} app-source
                         cd app-source
@@ -66,49 +103,104 @@ CMD ["npm", "start"]
             }
         }
         
-        stage('Setup ECR & Build with Buildah') {
+        stage('Setup ECR Authentication') {
             steps {
-                script {
-                    echo "🔨 Setting up ECR and building with Buildah..."
-                    
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-credentials',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        sh '''
-                            # Set up AWS CLI
-                            export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            
-                            echo "Installing Buildah..."
-                            # Install buildah (if not available)
-                            if ! command -v buildah &> /dev/null; then
-                                echo "Installing Buildah via package manager..."
-                                # This might need sudo permissions
-                                apt-get update && apt-get install -y buildah || \
-                                yum install -y buildah || \
-                                echo "Please install buildah manually"
-                            fi
-                            
-                            echo "Creating ECR repository..."
-                            aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
-                            aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
-                            
-                            echo "Login to ECR..."
-                            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | buildah login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
-                            
-                            echo "Building with Buildah..."
-                            cd app-source
-                            buildah build -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
-                            buildah tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_REPOSITORY}:latest
-                            
-                            echo "Pushing to ECR..."
-                            buildah push ${ECR_REPOSITORY}:${IMAGE_TAG}
-                            buildah push ${ECR_REPOSITORY}:latest
-                            
-                            echo "✅ Build and push completed with Buildah"
-                        '''
+                container('aws-cli') {
+                    script {
+                        echo "🔧 Setting up ECR authentication for Kaniko..."
+                        
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            sh '''
+                                echo "Creating ECR repository if it doesn't exist..."
+                                aws ecr describe-repositories --repository-names devops-gp-repository --region ${AWS_DEFAULT_REGION} || \
+                                aws ecr create-repository --repository-name devops-gp-repository --region ${AWS_DEFAULT_REGION}
+                                
+                                echo "Setting up ECR authentication for Kaniko..."
+                                
+                                # Ensure the directory exists
+                                mkdir -p /kaniko/.docker
+                                
+                                # Get ECR login token
+                                ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_DEFAULT_REGION})
+                                
+                                # Create Docker config file for Kaniko
+                                cat > /kaniko/.docker/config.json << EOF
+{
+    "auths": {
+        "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com": {
+            "auth": "$(echo -n AWS:${ECR_TOKEN} | base64 -w 0)"
+        }
+    }
+}
+EOF
+                                
+                                echo "✅ ECR authentication config created successfully"
+                                echo "Config file created at: /kaniko/.docker/config.json"
+                                
+                                # Verify the config file was created
+                                ls -la /kaniko/.docker/
+                                
+                                # Display config contents (handle missing jq gracefully)
+                                echo "Docker config file verification:"
+                                if command -v jq &> /dev/null; then
+                                    echo "Config structure (auth tokens hidden for security):"
+                                    cat /kaniko/.docker/config.json | jq 'del(.auths[].auth)'
+                                else
+                                    echo "Config file size: $(wc -c < /kaniko/.docker/config.json) bytes"
+                                    echo "Config file contains ECR registry: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+                                fi
+                                
+                                echo "✅ ECR authentication setup completed"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build & Push with Kaniko') {
+            steps {
+                container('kaniko') {
+                    script {
+                        echo "🔨 Building and pushing image with Kaniko..."
+                        
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            sh '''
+                                echo "Verifying ECR config is available..."
+                                ls -la /kaniko/.docker/
+                                
+                                if [ -f "/kaniko/.docker/config.json" ]; then
+                                    echo "✅ Docker config file found"
+                                    echo "File size: $(wc -c < /kaniko/.docker/config.json) bytes"
+                                else
+                                    echo "❌ Docker config file not found!"
+                                    exit 1
+                                fi
+                                
+                                echo "Starting Kaniko build..."
+                                
+                                /kaniko/executor \
+                                    --context=dir://./app-source \
+                                    --dockerfile=./app-source/dockerfile \
+                                    --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \
+                                    --destination=${ECR_REPOSITORY}:latest \
+                                    --cache=true \
+                                    --cleanup \
+                                    --verbosity=info
+                                
+                                echo "✅ Kaniko build and push completed successfully"
+                            '''
+                        }
                     }
                 }
             }
@@ -116,46 +208,28 @@ CMD ["npm", "start"]
         
         stage('Verify Deployment') {
             steps {
-                script {
-                    echo "✅ Verifying image deployment in ECR..."
-                    
+                container('aws-cli') {
+                    script {
+                        echo "✅ Verifying image deployment in ECR..."
+                        
                         withCredentials([[
                             $class: 'AmazonWebServicesCredentialsBinding',
                             credentialsId: 'aws-credentials',
                             accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                             secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        sh '''
-                            # Add AWS CLI to PATH
-                            export PATH=/tmp/aws-cli/v2/current/bin:$PATH
-                            
-                            echo "📊 Checking images in ECR repository:"
-                            aws ecr describe-images \
-                                --repository-name devops-gp-repository \
-                                --region ${AWS_DEFAULT_REGION} \
-                                --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
-                                --output table
-                            
-                            echo "✅ Successfully verified images in ECR"
-                        '''
+                        ]]) {
+                            sh '''
+                                echo "📊 Checking images in ECR repository:"
+                                aws ecr describe-images \
+                                    --repository-name devops-gp-repository \
+                                    --region ${AWS_DEFAULT_REGION} \
+                                    --query 'imageDetails[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
+                                    --output table
+                                
+                                echo "✅ Successfully verified images in ECR"
+                            '''
+                        }
                     }
-                }
-            }
-        }
-        
-        stage('Cleanup') {
-            steps {
-                script {
-                    echo "🧹 Cleaning up temporary files..."
-                    sh '''
-                        # Clean up Kaniko auth files
-                        rm -rf /tmp/kaniko/.docker || true
-                        
-                        # Clean up downloaded kaniko executor if any
-                        rm -f ./kaniko-executor || true
-                        
-                        echo "✅ Cleanup completed"
-                    '''
                 }
             }
         }
@@ -173,7 +247,7 @@ CMD ["npm", "start"]
                             "Duration: ${duration}\n" +
                             "Image: `${ECR_REPOSITORY}:${IMAGE_TAG}`\n" +
                             "Repository: ${env.NODEJS_REPO}\n" +
-                            "Platform: Jenkins + Buildah + ECR 🚀"
+                            "Platform: Jenkins K8s + Kaniko + ECR 🚀"
                 )
             }
         }
@@ -191,6 +265,11 @@ CMD ["npm", "start"]
                             "Please check the build logs for details 🔍"
                 )
             }
+        }
+        
+        always {
+            echo "🧹 Cleaning up workspace..."
+            sh 'rm -rf app-source || true'
         }
     }
 }
