@@ -123,7 +123,7 @@ spec:
     targetRevision: v1.15.0
     helm:
       values: |
-        installCRDs: false  # You must apply CRDs manually outside ArgoCD
+        installCRDs: true  # You must apply CRDs manually outside ArgoCD
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
