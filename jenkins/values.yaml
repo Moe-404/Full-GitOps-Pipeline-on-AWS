@@ -55,28 +55,6 @@ jenkins:
                       image: amazon/aws-cli:latest
                       command: ["/bin/sh"]
                       args: ["-c", "sleep 99d"]
-                    - name: trivy
-                      image: aquasec/trivy:latest
-                      command: ["/bin/sh"]
-                      args: ["-c", "sleep 99d"]
-                    - name: sonar-scanner
-                      image: sonarsource/sonar-scanner-cli:latest
-                      command: ["/bin/sh"]
-                      args: ["-c", "sleep 99d"]
-                    - name: nodejs
-                      image: node:18-alpine
-                      command: ["/bin/sh"]
-                      args: ["-c", "sleep 99d"]
-    
-    tool:
-      nodejs:
-        installations:
-          - name: "nodejs-18"
-            properties:
-              - installSource:
-                  installers:
-                    - nodeJSInstaller:
-                        id: "18.17.0"
 
 serviceAccount:
   create: true
