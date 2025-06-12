@@ -1,0 +1,37 @@
+- name: Configure Bastion to access Private EKS and install tools
+  hosts: bastion
+  become: true
+  pre_tasks:
+  - name: Update apt cache
+    apt:
+      update_cache: yes
+  - name: Install essential packages
+    apt:
+      name:
+      - unzip
+      - curl 
+      state: present
+  
+  vars_files:
+    - ./aws_cred.yaml
+  tasks:
+
+    - name: Install AWS CLI
+      include_role:
+        name: install_awscli
+
+    - name: Install kubectl
+      include_role:
+        name: install_kubectl
+
+    - name: Install Helm
+      include_role:
+        name: install_helm
+    
+    - name: Install ArgoCD
+      include_role:
+        name: install_argocd
+   
+    - name: Install Jenkins
+      include_role:
+        name: install_jenkiins

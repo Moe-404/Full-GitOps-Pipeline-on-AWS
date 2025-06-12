@@ -1,0 +1,2 @@
+argocd_k8s_namespace: argocd
+ansible_user: ubuntu

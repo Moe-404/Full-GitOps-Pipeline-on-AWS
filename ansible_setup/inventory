@@ -1,0 +1,2 @@
+[bastion]
+107.22.88.186 ansible_user=ubuntu
