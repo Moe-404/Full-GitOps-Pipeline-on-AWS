@@ -243,3 +243,39 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metricbeat
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  project: default
+  destination:
+    namespace: logging
+    server: https://kubernetes.default.svc
+  source:
+    repoURL: https://helm.elastic.co
+    chart: metricbeat
+    targetRevision: 7.17.3
+    helm:
+      values: |
+        daemonset:
+          enabled: true
+        deployment:
+          enabled: false
+        elasticsearch:
+          hosts:
+            - "http://elasticsearch-master.logging.svc.cluster.local:9200"
+        output.elasticsearch:
+          hosts: ["http://elasticsearch-master.logging.svc.cluster.local:9200"]
+        setup.kibana:
+          host: "kibana-kibana.logging.svc.cluster.local:5601"
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
