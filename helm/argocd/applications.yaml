@@ -176,12 +176,30 @@ spec:
     chart: elasticsearch
     targetRevision: 7.17.3
     helm:
-      valueFiles:
-        - helm/apps/logging/values.yaml
+      values: |
+        replicas: 1
+        minimumMasterNodes: 1
+        esJavaOpts: "-Xmx1g -Xms1g"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "2Gi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        volumeClaimTemplate:
+          accessModes: [ "ReadWriteOnce" ]
+          resources:
+            requests:
+              storage: 1Gi
+          storageClassName: gp2
+        persistence:
+          enabled: true
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
