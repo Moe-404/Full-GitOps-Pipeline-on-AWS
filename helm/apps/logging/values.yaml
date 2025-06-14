@@ -1,24 +1,4 @@
-replicas: 1
-minimumMasterNodes: 1
-esJavaOpts: "-Xmx1g -Xms1g"
 
-resources:
-  requests:
-    cpu: "100m"
-    memory: "2Gi"
-  limits:
-    cpu: "1000m"
-    memory: "2Gi"
-
-volumeClaimTemplate:
-  accessModes: [ "ReadWriteOnce" ]
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: "gp2"  
-
-persistence:
-  enabled: true
 
 
 
