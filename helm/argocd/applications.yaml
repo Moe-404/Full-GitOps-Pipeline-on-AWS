@@ -232,3 +232,36 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: elasticsearch
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging
+  source:
+    repoURL: https://helm.elastic.co
+    chart: elasticsearch
+    targetRevision: 7.17.3
+    helm:
+      values: |
+        replicas: 1
+        minimumMasterNodes: 1
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
