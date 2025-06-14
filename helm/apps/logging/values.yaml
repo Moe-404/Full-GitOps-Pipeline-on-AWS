@@ -12,5 +12,10 @@ volumeClaimTemplate:
   accessModes: [ "ReadWriteOnce" ]
   resources:
     requests:
-      storage: 10Gi
+      storage: 1Gi
+  storageClassName: "standard"  # Or whatever your cluster uses
+
+persistence:
+  enabled: true  # change to false if you're testing and don't need volume
+
 
