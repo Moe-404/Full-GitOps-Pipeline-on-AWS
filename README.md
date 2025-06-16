@@ -18,7 +18,7 @@ Key highlights include:
 
 ## Architecture Diagram
 
-![Screenshot 2025-06-12 153159](https://github.com/user-attachments/assets/569ac40f-29d2-437d-94ea-4e4a1f949392)
+![Architecture Diagram](images/'GITOPS Diagram.jpeg')
 
 
 ---
