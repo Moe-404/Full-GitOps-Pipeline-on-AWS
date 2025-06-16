@@ -18,7 +18,7 @@ Key highlights include:
 
 ## Architecture Diagram
 
-![Architecture Diagram](images/'GITOPS Diagram.jpeg')
+![Architecture Diagram](./images/'GITOPS Diagram.jpeg')
 
 
 ---
