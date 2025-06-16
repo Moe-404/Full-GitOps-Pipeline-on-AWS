@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: node-app
-        image: <eid-image>
+        image: 627073650373.dkr.ecr.us-east-1.amazonaws.com/devops-gp-repository/node-image:latest
         ports:
         - containerPort: 8000
         env:
